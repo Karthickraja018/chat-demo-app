@@ -1,13 +1,25 @@
 # Gemini Chat API
 
-A production-ready backend chat API built with **FastAPI** and **Google Gemini**.
+A production-ready backend chat API built with **FastAPI**, **Google Gemini**, and **LangSmith** observability.
+
+---
+
+## What changed (LangSmith integration)
+
+| Area | Before | After |
+|---|---|---|
+| Gemini SDK | `google-generativeai` direct calls | `langchain-google-genai` via LangChain |
+| Observability | None | LangSmith traces every request & LLM call |
+| Logging | None | Structured `logging` module |
+| Error body | Plain string | `{"error": "message"}` JSON |
+| Model init | `genai.GenerativeModel(...)` | `ChatGoogleGenerativeAI(...)` |
 
 ---
 
 ## Project Structure
 
 ```
-gemini-chat-api/
+deploy/
 ├── app.py
 ├── requirements.txt
 ├── .env.example
@@ -22,52 +34,61 @@ gemini-chat-api/
 
 ### Prerequisites
 - Python 3.12+
-- A [Google AI Studio](https://aistudio.google.com/app/apikey) API key
+- [Google AI Studio](https://aistudio.google.com/app/apikey) API key
+- [LangSmith](https://smith.langchain.com) account + API key
 
 ### Steps
 
 ```bash
-# 1. Clone / enter the project
-cd gemini-chat-api
-
-# 2. Create and activate a virtual environment
+# 1. Create and activate a virtual environment
 python -m venv .venv
 # Windows
 .venv\Scripts\activate
 # macOS / Linux
 source .venv/bin/activate
 
-# 3. Install dependencies
+# 2. Install dependencies
 pip install -r requirements.txt
 
-# 4. Configure environment
+# 3. Configure environment
 cp .env.example .env
-# Edit .env and set your GOOGLE_API_KEY
+# Edit .env — set GOOGLE_API_KEY and LANGSMITH_API_KEY
 
-# 5. Run the server
+# 4. Run the server
 uvicorn app:app --reload --port 8000
 ```
 
-Server starts at `http://localhost:8000`  
-Swagger UI: `http://localhost:8000/docs`  
-ReDoc: `http://localhost:8000/redoc`
+Server: `http://localhost:8000`  
+Swagger UI: `http://localhost:8000/docs`
+
+---
+
+## Environment Variables
+
+| Variable | Required | Description |
+|---|---|---|
+| `GOOGLE_API_KEY` | Yes | Google Gemini API key |
+| `LANGSMITH_API_KEY` | Yes | LangSmith API key |
+| `LANGSMITH_TRACING` | Yes | Set to `true` to enable tracing |
+| `LANGSMITH_PROJECT` | No | Project name in LangSmith (default: `default`) |
 
 ---
 
 ## API Endpoints
 
 ### GET `/`
+
 Health check.
 
-**Response**
 ```json
 { "message": "Gemini Chat API Running" }
 ```
 
 ### POST `/chat`
-Send a message to Gemini and receive a response.
 
-**Request body**
+Send a message to Gemini.
+
+**Request**
 ```json
 { "message": "What is Generative AI?" }
 ```
@@ -77,11 +98,14 @@ Send a message to Gemini and receive a response.
 { "response": "Generative AI refers to..." }
 ```
 
+**Error**
+```json
+{ "detail": { "error": "description of the error" } }
+```
+
 ---
 
 ## API Testing
-
-### cURL
 
 ```bash
 # Health check
@@ -93,94 +117,115 @@ curl -X POST http://localhost:8000/chat \
   -d '{"message": "What is Generative AI?"}'
 ```
 
-### PowerShell
-
-```powershell
-Invoke-RestMethod -Uri http://localhost:8000/chat `
-  -Method POST `
-  -ContentType "application/json" `
-  -Body '{"message": "What is Generative AI?"}'
-```
-
-### Swagger UI
-
-Open `http://localhost:8000/docs` in your browser and use the interactive UI to test endpoints.
-
 ---
 
 ## Docker
 
 ```bash
-# Build
 docker build -t gemini-chat-api .
 
-# Run
-docker run -p 8000:8000 -e GOOGLE_API_KEY=your_key gemini-chat-api
+docker run -p 8000:8000 \
+  -e GOOGLE_API_KEY=your_key \
+  -e LANGSMITH_API_KEY=your_key \
+  -e LANGSMITH_TRACING=true \
+  -e LANGSMITH_PROJECT=Gemini-Chat-App \
+  gemini-chat-api
 ```
 
 ---
 
-## Azure Deployment
+## Azure App Service Deployment
 
-### Option A — Azure Container Apps (recommended)
+### Required Azure Environment Variables
 
-```bash
-# 1. Login
-az login
+Set these in **Azure Portal → App Service → Settings → Environment variables** (or via CLI):
 
-# 2. Create resource group
-az group create --name gemini-chat-rg --location eastus
+| Variable | Value |
+|---|---|
+| `GOOGLE_API_KEY` | Your Google Gemini API key |
+| `LANGSMITH_API_KEY` | Your LangSmith API key |
+| `LANGSMITH_TRACING` | `true` |
+| `LANGSMITH_PROJECT` | `Gemini-Chat-App` |
 
-# 3. Create Container Registry
-az acr create --resource-group gemini-chat-rg \
-  --name geminichatacr --sku Basic --admin-enabled true
-
-# 4. Build and push image
-az acr build --registry geminichatacr \
-  --image gemini-chat-api:latest .
-
-# 5. Create Container Apps environment
-az containerapp env create \
-  --name gemini-chat-env \
-  --resource-group gemini-chat-rg \
-  --location eastus
-
-# 6. Deploy
-az containerapp create \
-  --name gemini-chat-app \
-  --resource-group gemini-chat-rg \
-  --environment gemini-chat-env \
-  --image geminichatacr.azurecr.io/gemini-chat-api:latest \
-  --registry-server geminichatacr.azurecr.io \
-  --env-vars GOOGLE_API_KEY=secretref:google-api-key \
-  --secrets google-api-key=your_google_api_key \
-  --target-port 8000 \
-  --ingress external \
-  --min-replicas 1 \
-  --max-replicas 5
-```
-
-Your API will be live at the FQDN shown in the output.
-
-### Option B — Azure App Service
+#### Set via Azure CLI
 
 ```bash
-# 1. Create App Service plan
-az appservice plan create \
-  --name gemini-chat-plan \
-  --resource-group gemini-chat-rg \
-  --is-linux --sku B1
-
-# 2. Create web app from container
-az webapp create \
-  --resource-group gemini-chat-rg \
-  --plan gemini-chat-plan \
-  --name gemini-chat-app \
-  --deployment-container-image-name geminichatacr.azurecr.io/gemini-chat-api:latest
-
-# 3. Set environment variable
 az webapp config appsettings set \
-  --resource-group gemini-chat-rg \
-  --name gemini-chat-app \
-  --settings GOOGLE_API_KEY=your_google_api_key
+  --resource-group <your-resource-group> \
+  --name chat-demo-webapp \
+  --settings \
+    GOOGLE_API_KEY="your_google_api_key" \
+    LANGSMITH_API_KEY="your_langsmith_api_key" \
+    LANGSMITH_TRACING="true" \
+    LANGSMITH_PROJECT="Gemini-Chat-App"
 ```
+
+---
+
+### GitHub Secrets
+
+Add these secrets in **GitHub → Repository → Settings → Secrets and variables → Actions**:
+
+| Secret | Description |
+|---|---|
+| `AZUREAPPSERVICE_PUBLISHPROFILE_...` | Azure publish profile (already set by Azure portal) |
+
+The LangSmith and Google keys are set directly on the Azure App Service — they do **not** need to be GitHub secrets unless you want to inject them at build time.
+
+---
+
+### Deployment Steps
+
+CI/CD is handled by `.github/workflows/main_chat-demo-webapp.yml`.
+
+1. Push to `main` branch — GitHub Actions triggers automatically.
+2. The workflow installs dependencies, uploads the artifact, and deploys to Azure App Service `chat-demo-webapp`.
+3. Azure Oryx builds the app on the platform using `requirements.txt`.
+
+Manual deploy trigger:
+
+```
+GitHub → Actions → "Build and deploy Python app" → Run workflow
+```
+
+---
+
+### Validation Steps
+
+After deployment:
+
+```bash
+# 1. Health check
+curl https://chat-demo-webapp.azurewebsites.net/
+
+# Expected: {"message":"Gemini Chat API Running"}
+
+# 2. Chat endpoint
+curl -X POST https://chat-demo-webapp.azurewebsites.net/chat \
+  -H "Content-Type: application/json" \
+  -d '{"message": "Hello"}'
+
+# Expected: {"response":"..."}
+
+# 3. LangSmith — open https://smith.langchain.com
+#    Navigate to project "Gemini-Chat-App"
+#    You should see a trace for each /chat request with:
+#      - chat_endpoint (chain run)
+#      - gemini_invoke  (llm run) with input/output and latency
+```
+
+---
+
+## LangSmith Trace Structure
+
+Each `/chat` call produces a two-level trace:
+
+```
+chat_endpoint  [chain]
+└── gemini_invoke  [llm]
+      input:  { message }
+      output: { content }
+      latency, tokens, errors
+```
+
+Errors are captured automatically and surfaced in the LangSmith UI with full stack traces.
