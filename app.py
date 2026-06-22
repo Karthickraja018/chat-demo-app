@@ -33,7 +33,7 @@ if not GOOGLE_API_KEY:
 # LangChain / Gemini model
 # ---------------------------------------------------------------------------
 llm = ChatGoogleGenerativeAI(
-    model="gemini-2.0-flash-lite",
+    model="gemini-3.1-flash-lite",
     google_api_key=GOOGLE_API_KEY,
 )
 
